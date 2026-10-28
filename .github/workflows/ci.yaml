@@ -1,12 +1,22 @@
-# Pipeline stage 3 of 4: publish.
-# On pushes to main only, logs in to GHCR with the built-in GITHUB_TOKEN
-# and pushes a multi-arch image tagged with the commit SHA.
+# Pipeline stage 4 of 4: promote (the complete pipeline).
+# CI for the todo app.
+#   Pull request : lint + test + build + scan   (nothing is pushed)
+#   Push to main : the above + push image to GHCR + promote the new tag
+#                  to the GitOps config repo (Argo CD then deploys it)
 name: ci
 
 on:
   pull_request:
   push:
     branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Override with a repository variable GITOPS_REPO if your config repo has another name
+  GITOPS_REPO: ${{ vars.GITOPS_REPO || format('{0}/todo-gitops', github.repository_owner) }}
 
 jobs:
   test:
@@ -83,3 +93,41 @@ jobs:
           build-args: APP_VERSION=${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
+
+  promote:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: promote
+      cancel-in-progress: false
+    steps:
+      - name: Check the GitOps token exists
+        env:
+          TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Secret GITOPS_TOKEN is missing. See README step 4."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+
+      - name: Point the config repo at the new image
+        run: |
+          file=apps/todo/kustomization.yaml
+          sed -i "s|newName: .*|newName: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/todo-api|" "$file"
+          sed -i "s|newTag: .*|newTag: \"${GITHUB_SHA}\"|" "$file"
+          if git diff --quiet; then
+            echo "Config repo already points at ${GITHUB_SHA}"
+            exit 0
+          fi
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git commit -am "deploy: todo-api ${GITHUB_SHA::7}" -m "From ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          git push
