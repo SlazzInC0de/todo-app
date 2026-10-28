@@ -13,7 +13,7 @@ function createApp({ store, version = 'dev' }) {
 
   // --- operational endpoints -------------------------------------------
   // Liveness: is the process alive? (never checks dependencies)
-  app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
+  app.get('/healthz', (_req, res) => res.status(500).json({ status: 'broken' }));
 
   // Readiness: can this instance serve traffic right now? (checks the DB)
   app.get('/readyz', async (_req, res) => {

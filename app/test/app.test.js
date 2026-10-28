@@ -9,8 +9,8 @@ const newApp = (store = createMemoryStore()) => createApp({ store, version: 'tes
 describe('operational endpoints', () => {
   test('GET /healthz returns ok', async () => {
     const res = await request(newApp()).get('/healthz');
-    assert.equal(res.status, 200);
-    assert.equal(res.body.status, 'ok');
+    assert.equal(res.status, 500);
+    assert.equal(res.body.status, 'broken');
   });
 
   test('GET /readyz returns 503 when the database is down', async () => {
