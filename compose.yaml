@@ -1,0 +1,35 @@
+# Local development stack: API + PostgreSQL.
+#   cp .env.example .env && docker compose up -d --build
+#   open http://localhost:3000
+services:
+  api:
+    build:
+      context: ./app
+      args:
+        APP_VERSION: local
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      DB_HOST: db          # service name = DNS name on the Compose network
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

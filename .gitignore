@@ -1,0 +1,19 @@
+# secrets
+.env
+*.tfvars
+!lab.auto.tfvars
+
+# node
+node_modules/
+npm-debug.log*
+coverage/
+
+# OpenTofu / Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+
+# misc
+.DS_Store

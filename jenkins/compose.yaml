@@ -1,0 +1,18 @@
+# Local Jenkins for the self-study pipeline exercise.
+#   docker compose -f jenkins/compose.yaml up -d --build
+#   open http://localhost:8090
+services:
+  jenkins:
+    build: .
+    # Lab shortcut: run as root so Jenkins can use the host Docker socket
+    # without matching group IDs across Linux / macOS / WSL2.
+    user: root
+    ports:
+      - "8090:8080"     # 8080 is used by the kind cluster
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:

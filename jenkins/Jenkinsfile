@@ -1,0 +1,100 @@
+// The same pipeline as .github/workflows/ci.yaml, written for Jenkins.
+// Self-study exercise: compare each stage with its GitHub Actions equivalent.
+//
+// Needs two Jenkins credentials (Manage Jenkins -> Credentials), both
+// "Username with password":
+//   ghcr   : your GitHub username + a classic token with write:packages
+//   gitops : your GitHub username + the fine-grained token for todo-gitops
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+
+  triggers {
+    // A laptop cannot receive GitHub webhooks, so Jenkins checks Git every ~2 min
+    pollSCM('H/2 * * * *')
+  }
+
+  environment {
+    GITHUB_USER = 'slazzinc0de'                 // set by `make personalize` (lowercase)
+    IMAGE       = "ghcr.io/${GITHUB_USER}/todo-api"
+    GITOPS_REPO = "github.com/${GITHUB_USER}/todo-gitops.git"
+    TRIVY_IMAGE = 'aquasec/trivy:0.75.0'              // pinned scanner version
+  }
+
+  stages {
+    stage('Test') {
+      steps {
+        dir('app') {
+          sh 'npm ci && npm run lint && npm test'
+        }
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh 'docker build --build-arg APP_VERSION="$GIT_COMMIT" -t "$IMAGE:$GIT_COMMIT" ./app'
+      }
+    }
+
+    stage('Scan') {
+      steps {
+        // Trivy runs as a container and reads the image through the Docker socket
+        sh '''
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --severity CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE:$GIT_COMMIT"
+        '''
+      }
+    }
+
+    stage('Push') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'ghcr',
+                          usernameVariable: 'REG_USER', passwordVariable: 'REG_TOKEN')]) {
+          sh '''
+            echo "$REG_TOKEN" | docker login ghcr.io -u "$REG_USER" --password-stdin
+            docker push "$IMAGE:$GIT_COMMIT"
+            docker logout ghcr.io
+          '''
+        }
+      }
+    }
+
+    stage('Promote') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'gitops',
+                          usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+          sh '''
+            rm -rf gitops
+            git clone --depth 1 "https://$GIT_USER:$GIT_TOKEN@$GITOPS_REPO" gitops
+            cd gitops || exit 1
+            sed -i "s|newName: .*|newName: $IMAGE|" apps/todo/kustomization.yaml
+            sed -i "s|newTag: .*|newTag: \\"$GIT_COMMIT\\"|" apps/todo/kustomization.yaml
+            if git diff --quiet; then
+              echo "Config repo already points at $GIT_COMMIT"
+              exit 0
+            fi
+            SHORT=$(echo "$GIT_COMMIT" | cut -c1-7)
+            git -c user.name=jenkins-bot -c user.email=jenkins-bot@users.noreply.github.com \
+              commit -am "deploy: todo-api $SHORT (jenkins)"
+            git push
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker image rm "$IMAGE:$GIT_COMMIT" >/dev/null 2>&1 || true'
+    }
+    cleanup {
+      cleanWs()   // also removes the cloned repo that contains the token in its URL
+    }
+  }
+}

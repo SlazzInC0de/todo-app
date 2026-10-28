@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todo · DevOps Lab</title>
+  <style>
+    :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2433; --muted: #6b7280; --accent: #2563eb; --line: #e5e7eb; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f1419; --card: #182029; --ink: #e6e9ee; --muted: #9aa4b2; --accent: #60a5fa; --line: #2a3441; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+    main { max-width: 560px; margin: 48px auto; padding: 0 16px; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 24px; font-size: .9rem; }
+    form { display: flex; gap: 8px; margin-bottom: 16px; }
+    input[type=text] { flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 1rem; }
+    button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-size: 1rem; cursor: pointer; }
+    ul { list-style: none; padding: 0; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+    li { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--line); }
+    li:first-child { border-top: 0; }
+    li span { flex: 1; }
+    li.done span { text-decoration: line-through; color: var(--muted); }
+    li button { background: transparent; color: var(--muted); padding: 4px 8px; font-size: .9rem; }
+    .empty { color: var(--muted); padding: 16px; text-align: center; }
+    footer { margin-top: 24px; color: var(--muted); font-size: .8rem; }
+    #error { color: #dc2626; min-height: 1.2em; font-size: .9rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Todo</h1>
+  <p class="sub">CSE3130 end-to-end DevOps lab · code to cluster</p>
+  <form id="add">
+    <input id="title" type="text" placeholder="What needs doing?" maxlength="200" required autocomplete="off">
+    <button type="submit">Add</button>
+  </form>
+  <div id="error"></div>
+  <ul id="list"></ul>
+  <footer>Version <code id="version">…</code></footer>
+</main>
+<script>
+  const list = document.getElementById('list');
+  const errorBox = document.getElementById('error');
+
+  async function api(path, options = {}) {
+    const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+    if (!res.ok && res.status !== 204) throw new Error((await res.json()).error || res.statusText);
+    return res.status === 204 ? null : res.json();
+  }
+
+  function render(todos) {
+    list.replaceChildren();
+    if (todos.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'Nothing yet. Add your first todo.';
+      list.append(li);
+      return;
+    }
+    for (const t of todos) {
+      const li = document.createElement('li');
+      if (t.done) li.className = 'done';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = t.done;
+      box.onchange = () => run(() => api(`/api/todos/${t.id}`, { method: 'PATCH', body: JSON.stringify({ done: box.checked }) }));
+      const span = document.createElement('span');
+      span.textContent = t.title;
+      const del = document.createElement('button');
+      del.textContent = 'Delete';
+      del.onclick = () => run(() => api(`/api/todos/${t.id}`, { method: 'DELETE' }));
+      li.append(box, span, del);
+      list.append(li);
+    }
+  }
+
+  async function refresh() { render(await api('/api/todos')); }
+
+  async function run(action) {
+    try { errorBox.textContent = ''; await action(); await refresh(); }
+    catch (err) { errorBox.textContent = err.message; }
+  }
+
+  document.getElementById('add').onsubmit = (e) => {
+    e.preventDefault();
+    const input = document.getElementById('title');
+    run(async () => { await api('/api/todos', { method: 'POST', body: JSON.stringify({ title: input.value }) }); input.value = ''; });
+  };
+
+  api('/version').then((v) => { document.getElementById('version').textContent = v.version; }).catch(() => {});
+  run(async () => {});
+</script>
+</body>
+</html>
